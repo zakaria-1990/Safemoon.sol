@@ -1,28 +1,7 @@
-/**
- *Submitted for verification at BscScan.com on 2021-03-01
-*/
+// SPDX-License-Identifier: MIT
 
-/**
- *Submitted for verification at BscScan.com on 2021-03-01
-*/
-
-/**
-  
-   #BEE
-   
-   #LIQ+#RFI+#SHIB+#DOGE = #BEE
-
-   #SAFEMOON features:
-   3% fee auto add to the liquidity pool to locked forever when selling
-   2% fee auto distribute to all holders
-   I created a black hole so #Bee token will deflate itself in supply with every transaction
-   50% Supply is burned at start.
-   
-
- */
 
 pragma solidity ^0.6.12;
-// SPDX-License-Identifier: Unlicensed
 interface IERC20 {
 
     function totalSupply() external view returns (uint256);
@@ -705,8 +684,8 @@ contract SafeMoon is Context, IERC20, Ownable {
     using SafeMath for uint256;
     using Address for address;
 
-    mapping (address => uint256) private _rOwned;
-    mapping (address => uint256) private _tOwned;
+    mapping (address => uint256) private _rOwned;          // user's balance represented in reflected space
+    mapping (address => uint256) private _tOwned;         //  user's balance represented in reflected space (only used by non stackers)
     mapping (address => mapping (address => uint256)) private _allowances;
 
     mapping (address => bool) private _isExcludedFromFee;
@@ -714,14 +693,21 @@ contract SafeMoon is Context, IERC20, Ownable {
     mapping (address => bool) private _isExcluded;
     address[] private _excluded;
    
-    uint256 private constant MAX = ~uint256(0);
-    uint256 private _tTotal = 1000000000 * 10**6 * 10**9;
-    uint256 private _rTotal = (MAX - (MAX % _tTotal));
+    uint256 private constant MAX = ~uint256(0);           // MAX = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+    uint256 private constant _tTotal = 1000000000 * 10**6 * 10**9; // _tTotal = 10000000000000000 
+                                                          // true totale or the real total supply
+    uint256 private _rTotal = (MAX - (MAX % _tTotal));    // _rTotal = 115792089237316195423570985008687907853269984665640564039457580000000000000000
+                                                          // reflected total is used to reduce the cost of sending fees to holders
+                                                          // reflected total is a multiple of true total, and it's betwen MAX-_tTotal and MAX
+                                                          // MAX can be every number above _tTotal, so we choose the maximum number availble 
+                                                          // Any t_space value (t) can be converted into r_space value (r) as follows: 
+                                                          //                        r = q*t = (_rTotal/_tTotal)*t 
+    
     uint256 private _tFeeTotal;
 
-    string private _name = "SafeMoon";
-    string private _symbol = "SAFEMOON";
-    uint8 private _decimals = 9;
+    string private constant _name = "SafeMoon";
+    string private constant _symbol = "SAFEMOON";
+    uint8 private constant _decimals = 9;
     
     uint256 public _taxFee = 5;
     uint256 private _previousTaxFee = _taxFee;
@@ -735,16 +721,27 @@ contract SafeMoon is Context, IERC20, Ownable {
     bool inSwapAndLiquify;
     bool public swapAndLiquifyEnabled = true;
     
-    uint256 public _maxTxAmount = 5000000 * 10**6 * 10**9;
-    uint256 private numTokensSellToAddToLiquidity = 500000 * 10**6 * 10**9;
+    uint256 public _maxTxAmount = 5000000 * 10**6 * 10**9;                  // set the maximum amount of the transaction to 0.05% of the total supply
+    uint256 private constant numTokensSellToAddToLiquidity = 500000 * 10**6 * 10**9; // min number of tokens that we need to initiate a swap + liquidity lock
     
-    event MinTokensBeforeSwapUpdated(uint256 minTokensBeforeSwap);
     event SwapAndLiquifyEnabledUpdated(bool enabled);
     event SwapAndLiquify(
         uint256 tokensSwapped,
         uint256 ethReceived,
-        uint256 tokensIntoLiqudity
+        uint256 tokensIntoLiquidity
     );
+    event ExcludedFromReward(address account);
+    event IncludeInReward(address account);
+    event ExcludeFromFee(address account);
+    event IncludeInFee(address account);
+    event SetTaxFeePercentTo(uint256 taxFee);
+    event SetLiquidityFeePercentTo(uint256 liquidityFee);
+    event SetMaxTxPercentTo(uint256 maxTxPercent);
+    event AllFeeRemoved();
+    event LiquidityTaken(uint256 tLiquidity);
+    event AllFeeRestored();
+    event TokensSwappedForEth(uint256 tokenAmount);
+    event LiquidityAddedToLiquidityPool(uint256 tokenAmount, uint256 ethAmount);
     
     modifier lockTheSwap {
         inSwapAndLiquify = true;
@@ -829,15 +826,6 @@ contract SafeMoon is Context, IERC20, Ownable {
         return _tFeeTotal;
     }
 
-    function deliver(uint256 tAmount) public {
-        address sender = _msgSender();
-        require(!_isExcluded[sender], "Excluded addresses cannot call this function");
-        (uint256 rAmount,,,,,) = _getValues(tAmount);
-        _rOwned[sender] = _rOwned[sender].sub(rAmount);
-        _rTotal = _rTotal.sub(rAmount);
-        _tFeeTotal = _tFeeTotal.add(tAmount);
-    }
-
     function reflectionFromToken(uint256 tAmount, bool deductTransferFee) public view returns(uint256) {
         require(tAmount <= _tTotal, "Amount must be less than supply");
         if (!deductTransferFee) {
@@ -849,7 +837,7 @@ contract SafeMoon is Context, IERC20, Ownable {
         }
     }
 
-    function tokenFromReflection(uint256 rAmount) public view returns(uint256) {
+    function tokenFromReflection(uint256 rAmount) public view returns(uint256) { // pass from reflected space to true space
         require(rAmount <= _rTotal, "Amount must be less than total reflections");
         uint256 currentRate =  _getRate();
         return rAmount.div(currentRate);
@@ -863,10 +851,11 @@ contract SafeMoon is Context, IERC20, Ownable {
         }
         _isExcluded[account] = true;
         _excluded.push(account);
+        emit ExcludedFromReward(account);
     }
 
     function includeInReward(address account) external onlyOwner() {
-        require(_isExcluded[account], "Account is already excluded");
+        require(_isExcluded[account], "Account is not exluded");
         for (uint256 i = 0; i < _excluded.length; i++) {
             if (_excluded[i] == account) {
                 _excluded[i] = _excluded[_excluded.length - 1];
@@ -876,6 +865,7 @@ contract SafeMoon is Context, IERC20, Ownable {
                 break;
             }
         }
+        emit IncludeInReward(address account);
     }
         function _transferBothExcluded(address sender, address recipient, uint256 tAmount) private {
         (uint256 rAmount, uint256 rTransferAmount, uint256 rFee, uint256 tTransferAmount, uint256 tFee, uint256 tLiquidity) = _getValues(tAmount);
@@ -890,24 +880,29 @@ contract SafeMoon is Context, IERC20, Ownable {
     
         function excludeFromFee(address account) public onlyOwner {
         _isExcludedFromFee[account] = true;
+        emit ExcludeFromFee(account);
     }
     
     function includeInFee(address account) public onlyOwner {
         _isExcludedFromFee[account] = false;
+        emit IncludeInFee(account);
     }
     
     function setTaxFeePercent(uint256 taxFee) external onlyOwner() {
         _taxFee = taxFee;
+        emit SetTaxFeePercentTo(taxFee);
     }
     
     function setLiquidityFeePercent(uint256 liquidityFee) external onlyOwner() {
         _liquidityFee = liquidityFee;
+        emit SetLiquidityFeePercentTo(liquidityFee);
     }
    
     function setMaxTxPercent(uint256 maxTxPercent) external onlyOwner() {
         _maxTxAmount = _tTotal.mul(maxTxPercent).div(
             10**2
         );
+        emit SetMaxTxPercentTo(maxTxPercent);
     }
 
     function setSwapAndLiquifyEnabled(bool _enabled) public onlyOwner {
@@ -915,7 +910,7 @@ contract SafeMoon is Context, IERC20, Ownable {
         emit SwapAndLiquifyEnabledUpdated(_enabled);
     }
     
-     //to recieve ETH from uniswapV2Router when swaping
+     //to receive ETH from uniswapV2Router when swapping
     receive() external payable {}
 
     function _reflectFee(uint256 rFee, uint256 tFee) private {
@@ -967,6 +962,7 @@ contract SafeMoon is Context, IERC20, Ownable {
         _rOwned[address(this)] = _rOwned[address(this)].add(rLiquidity);
         if(_isExcluded[address(this)])
             _tOwned[address(this)] = _tOwned[address(this)].add(tLiquidity);
+        emit LiquidityTaken(tLiquidity);
     }
     
     function calculateTaxFee(uint256 _amount) private view returns (uint256) {
@@ -990,10 +986,12 @@ contract SafeMoon is Context, IERC20, Ownable {
         _taxFee = 0;
         _liquidityFee = 0;
     }
+    emit AllFeeRemoved();
     
     function restoreAllFee() private {
         _taxFee = _previousTaxFee;
         _liquidityFee = _previousLiquidityFee;
+        emit AllFeeRestored();
     }
     
     function isExcludedFromFee(address account) public view returns(bool) {
@@ -1076,6 +1074,10 @@ contract SafeMoon is Context, IERC20, Ownable {
         
         emit SwapAndLiquify(half, newBalance, otherHalf);
     }
+    
+    // add a function that use the remaining bnb from the swapAndLiquify function, this function should:
+    // Distribute BNB to SafeMoon token holders proportional to the amount of token they hold or
+    // Use leftover BNB to buy back SafeMoon tokens from the market to increase the price of SafeMoon
 
     function swapTokensForEth(uint256 tokenAmount) private {
         // generate the uniswap pair path of token -> weth
@@ -1093,6 +1095,7 @@ contract SafeMoon is Context, IERC20, Ownable {
             address(this),
             block.timestamp
         );
+        emit TokensSwappedForEth(tokenAmount);
     }
 
     function addLiquidity(uint256 tokenAmount, uint256 ethAmount) private {
@@ -1100,15 +1103,18 @@ contract SafeMoon is Context, IERC20, Ownable {
         _approve(address(this), address(uniswapV2Router), tokenAmount);
 
         // add the liquidity
-        uniswapV2Router.addLiquidityETH{value: ethAmount}(
+        (uint amountToken, uint amountETH, uint liquidity) = uniswapV2Router.addLiquidityETH{value: ethAmount}(
             address(this),
             tokenAmount,
             0, // slippage is unavoidable
             0, // slippage is unavoidable
-            owner(),
-            block.timestamp
+            owner(),                           // change the recipient of the LP tokens to a loocked smart contract or address(this)
+            block.timestamp                    //  some feasible solutions are: 
         );
-    }
+        emit LiquidityAddedToLiquidityPool(tokenAmount,ethAmount);             
+                                               //  Time-lock with reasonable latency, i.e. 48 hours, for awareness on privileged operations;
+    }                                          // Assignment of privileged roles to multi-signature wallets to prevent single point of failure due to theprivate key;
+                                               // Introduction of a DAO / governance / voting module to increase transparency and user involvement.
 
     //this method is responsible for taking all fee, if takeFee is true
     function _tokenTransfer(address sender, address recipient, uint256 amount,bool takeFee) private {
@@ -1119,8 +1125,6 @@ contract SafeMoon is Context, IERC20, Ownable {
             _transferFromExcluded(sender, recipient, amount);
         } else if (!_isExcluded[sender] && _isExcluded[recipient]) {
             _transferToExcluded(sender, recipient, amount);
-        } else if (!_isExcluded[sender] && !_isExcluded[recipient]) {
-            _transferStandard(sender, recipient, amount);
         } else if (_isExcluded[sender] && _isExcluded[recipient]) {
             _transferBothExcluded(sender, recipient, amount);
         } else {
@@ -1129,6 +1133,8 @@ contract SafeMoon is Context, IERC20, Ownable {
         
         if(!takeFee)
             restoreAllFee();
+        
+        emit Transfer(sender, recipient, amount);
     }
 
     function _transferStandard(address sender, address recipient, uint256 tAmount) private {
@@ -1161,6 +1167,17 @@ contract SafeMoon is Context, IERC20, Ownable {
     }
 
 
+    // issues to solve after: 
+    // The owner of contract Safemoon has the permission to:
+    // 1. change the address that can receive LP tokens,
+    // 2. lock the contract
+    // 3. exclude/include addresses from rewards/fees
+    // 4. set taxFee , liquidityFee and _maxTxAmount
+    // 5. enable swapAndLiquifyEnabled
+    // without obtaining the consensus of the community.
     
+    // Recommendation
+    // Renounce ownership when it is the right timing, 
+    // or gradually migrate to a timelock plus multisig governingprocedure and let the community monitor in respect of transparency considerations
 
 }
