@@ -1179,5 +1179,17 @@ contract SafeMoon is Context, IERC20, Ownable {
     // Recommendation
     // Renounce ownership when it is the right timing, 
     // or gradually migrate to a timelock plus multisig governingprocedure and let the community monitor in respect of transparency considerations
+    
+    //  Possible to gain ownership after renouncing the contractownership
+    // An owner is possible to gain ownership of the contract even if he calls function renounceOwnership torenounce the ownership. 
+    // This can be achieved by performing the following operations:
+    // 1- Call lock to lock the contract. The variable _previousOwner is set to the current owner.
+    // 2- Call unlock to unlock the contract.
+    // 3- Call renounceOwnership to leave the contract without an owner.
+    // 4- Call unlock to regain ownership.
+    // Recommendation
+    // We advise updating/removing lock and unlock functions in the contract; or removing therenounceOwnership if such a privilege retains at the protocol level.
+    // If timelock functionality could beintroduced, we recommend using the implementation of Compound finance as reference. 
+    // Reference:https://github.com/compound-finance/compound-protocol/blob/master/contracts/Timelock.sol
 
 }
